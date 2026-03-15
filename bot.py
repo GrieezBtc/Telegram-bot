@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ---------------- CONFIG ---------------- #
 TOKEN = '8659397259:AAFHka2puHwFoepZLeor_duJVWpgxBBGV8Y'
-ADMINS = [123456789, 987654321]  # replace with your Telegram IDs
+ADMINS = [6158540839,]  
 DB_FILE = 'sms_bot.db'
 COOLDOWN_SEC = 5  # seconds
 
