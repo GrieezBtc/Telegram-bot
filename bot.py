@@ -31,7 +31,7 @@ SKIP_JOIN = [6158540839]  # Add trusted admin IDs here
 REQUIRED_CHANNEL = "@yourchannelusername"
 REQUIRED_GROUP = "@yourgroupusername"
 CHANNEL_LINK = "https://t.me/yourchannelusername"
-GROUP_LINK = "https://t.me/yourgroupusername"
+GROUP_LINK = "https://t.me/+WWCrTT_d-tIwYjRk"
 
 DEFAULT_COUNTRY = "Nigeria"
 DEFAULT_COOLDOWN = 5
