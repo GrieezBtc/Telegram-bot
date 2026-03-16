@@ -25,12 +25,12 @@ DB_FILE = "sms_bot.db"
 OWNERS = [6158540839]
 
 # Users who skip join verification
-SKIP_JOIN = [6158540839]  # Add trusted admin IDs here
+SKIP_JOIN = [6158540839] 
 
 # Required join channels/groups
-REQUIRED_CHANNEL = "@yourchannelusername"
-REQUIRED_GROUP = "@yourgroupusername"
-CHANNEL_LINK = "https://t.me/yourchannelusername"
+REQUIRED_CHANNEL = "@smschannel"
+REQUIRED_GROUP = "@smsgc"
+CHANNEL_LINK = "https://t.me/+PVmudYXtfoE1NmQ0"
 GROUP_LINK = "https://t.me/+WWCrTT_d-tIwYjRk"
 
 DEFAULT_COUNTRY = "Nigeria"
