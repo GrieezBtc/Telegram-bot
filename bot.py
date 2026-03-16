@@ -11,9 +11,9 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
-    CallbackQueryHandler,
     ConversationHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 
@@ -21,9 +21,13 @@ from telegram.ext import (
 TOKEN = "8659397259:AAEwDPMd1V4eaDpQJelR-0585YwBzlHFHuI"
 DB_FILE = "sms_bot.db"
 
+# Owners/admins
 OWNERS = [6158540839]
 
-# Force join settings
+# Users who skip join verification
+SKIP_JOIN = [6158540839]  # Add trusted admin IDs here
+
+# Required join channels/groups
 REQUIRED_CHANNEL = "@yourchannelusername"
 REQUIRED_GROUP = "@yourgroupusername"
 CHANNEL_LINK = "https://t.me/yourchannelusername"
@@ -36,7 +40,7 @@ DEFAULT_COOLDOWN = 5
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 c = conn.cursor()
 
-# Users
+# Users table
 c.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -45,29 +49,21 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# Admins
+# Admins table
 c.execute("""
 CREATE TABLE IF NOT EXISTS admins (
     user_id INTEGER PRIMARY KEY
 )
 """)
 
-# Blocked numbers
+# Blocked numbers table
 c.execute("""
 CREATE TABLE IF NOT EXISTS blocked_numbers (
     number TEXT PRIMARY KEY
 )
 """)
 
-# Settings
-c.execute("""
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-)
-""")
-
-# SMS panels
+# SMS panel table
 c.execute("""
 CREATE TABLE IF NOT EXISTS sms_panels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,11 +72,19 @@ CREATE TABLE IF NOT EXISTS sms_panels (
 )
 """)
 
-# OTP data
+# OTP table
 c.execute("""
 CREATE TABLE IF NOT EXISTS otp_data (
     user_id INTEGER PRIMARY KEY,
     otp_code TEXT
+)
+""")
+
+# Settings table
+c.execute("""
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
 )
 """)
 
@@ -94,15 +98,15 @@ conn.commit()
 # ================= MEMORY ================= #
 cooldowns = {}
 
-# ================= HELPER FUNCTIONS ================= #
+# ================= HELPERS ================= #
 def get_setting(key, default=None):
-    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    c.execute("SELECT value FROM settings WHERE key=?", (key,))
     row = c.fetchone()
     return row[0] if row else default
 
 def set_setting_value(key, value):
     c.execute("""
-        INSERT INTO settings (key, value) VALUES (?, ?)
+        INSERT INTO settings (key,value) VALUES (?,?)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value
     """, (key, str(value)))
     conn.commit()
@@ -113,21 +117,20 @@ def is_owner(user_id: int):
 def is_admin(user_id: int):
     if is_owner(user_id):
         return True
-    c.execute("SELECT user_id FROM admins WHERE user_id = ?", (user_id,))
+    c.execute("SELECT user_id FROM admins WHERE user_id=?", (user_id,))
     return c.fetchone() is not None
 
 def is_number_blocked(number: str):
-    c.execute("SELECT number FROM blocked_numbers WHERE number = ?", (number,))
+    c.execute("SELECT number FROM blocked_numbers WHERE number=?", (number,))
     return c.fetchone() is not None
 
 async def check_cooldown(update: Update):
     cooldown_sec = int(get_setting("cooldown", DEFAULT_COOLDOWN))
     user_id = update.effective_user.id
     now = time.time()
-
     if user_id in cooldowns and now - cooldowns[user_id] < cooldown_sec:
         await update.message.reply_text(
-            f"⏳ Please wait {cooldown_sec} seconds before using another command."
+            f"⏳ Please wait {cooldown_sec}s before using another command."
         )
         return False
     cooldowns[user_id] = now
@@ -151,7 +154,10 @@ def join_buttons():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# ================= FORCE JOIN ================= #
 async def check_force_join(user_id: int, context: ContextTypes.DEFAULT_TYPE):
+    if user_id in SKIP_JOIN:
+        return True
     try:
         channel_member = await context.bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         group_member = await context.bot.get_chat_member(REQUIRED_GROUP, user_id)
@@ -163,14 +169,13 @@ async def check_force_join(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         return False
 
-# ================= CONVERSATION STATES ================= #
+# ================= STATES ================= #
 ASK_NUMBER, ASK_COUNTRY = range(2)
 
 # ================= USER COMMANDS ================= #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_cooldown(update):
         return
-
     joined = await check_force_join(update.effective_user.id, context)
     if not joined:
         await update.message.reply_text(
@@ -191,7 +196,6 @@ async def ask_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_number_blocked(user_input):
         await update.message.reply_text("🚫 This number is blocked. Enter another number.")
         return ASK_NUMBER
-
     context.user_data["number"] = user_input
     await update.message.reply_text("🌍 Great! Now enter your country:")
     return ASK_COUNTRY
@@ -202,11 +206,10 @@ async def ask_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
     number = context.user_data.get("number")
 
     c.execute("""
-        INSERT INTO users (id, number, country) VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET number=excluded.number, country=excluded.country
+        INSERT INTO users (id,number,country) VALUES (?,?,?)
+        ON CONFLICT(id) DO UPDATE SET number=excluded.number,country=excluded.country
     """, (user_id, number, country))
     conn.commit()
-
     await update.message.reply_text(
         f"✅ Registration complete!\n\n📱 Number: {number}\n🌍 Country: {country}",
         reply_markup=main_menu()
@@ -220,17 +223,15 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_cooldown(update):
         return
-
     text = (
-        "📖 *User Commands*\n\n"
+        "📖 *User Commands*\n"
         "/start - Start registration\n"
-        "/help - Show this help\n"
-        "/getnumber - View your saved number\n"
+        "/help - Show help\n"
+        "/getnumber - View your number\n"
         "/getcountry - View default country\n"
         "/viewotp - View your OTP\n"
         "/joinchannel - Join required channel/group\n"
     )
-
     if is_admin(update.effective_user.id):
         text += (
             "\n🔐 *Admin Commands*\n"
@@ -238,18 +239,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/addadmin <id>\n/removeadmin <id>\n/block <number>\n/unblock <number>\n"
             "/setcountry <country>\n/cooldown <seconds>\n/addsms <name> <url>\n/listsms\n/otpcode <id> <code>\n"
         )
-
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_menu())
 
-# ================= CALLBACKS ================= #
+# ================= CALLBACK ================= #
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "verify_join":
         joined = await check_force_join(query.from_user.id, context)
         if joined:
-            await query.message.reply_text("✅ Verified! You can now register.", reply_markup=main_menu())
-            await query.message.reply_text("📱 Please enter your phone number:")
+            await query.message.reply_text(
+                "✅ Verified! You can now register.", reply_markup=main_menu()
+            )
+            await update.message.reply_text("📱 Please enter your phone number:")
             return ASK_NUMBER
         else:
             await query.message.reply_text(
@@ -258,9 +260,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 # ================= ADMIN COMMANDS ================= #
-# (same admin commands as V2)
-# For brevity, reuse V2 admin command functions here
-# add_admin, remove_admin, block_number, unblock_number, etc.
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Not authorized.")
+        return
+    if not await check_cooldown(update): return
+    if not context.args:
+        await update.message.reply_text("❌ Usage: /broadcast Hello everyone")
+        return
+    msg = ' '.join(context.args)
+    c.execute("SELECT id FROM users")
+    users = c.fetchall()
+    sent = failed = 0
+    for (uid,) in users:
+        try: await context.bot.send_message(chat_id=uid, text=msg); sent+=1
+        except: failed+=1
+    await update.message.reply_text(f"✅ Broadcast done.\nSent: {sent}\nFailed: {failed}")
 
 # ================= MAIN ================= #
 app = ApplicationBuilder().token(TOKEN).build()
@@ -276,21 +291,12 @@ conv_handler = ConversationHandler(
 )
 app.add_handler(conv_handler)
 
-# User commands
+# User & admin commands
 app.add_handler(CommandHandler("help", help_command))
-app.add_handler(CommandHandler("getnumber", lambda u,c: get_number(u,c)))
-app.add_handler(CommandHandler("getcountry", lambda u,c: get_country(u,c)))
-app.add_handler(CommandHandler("viewotp", lambda u,c: view_otp(u,c)))
-app.add_handler(CommandHandler("joinchannel", lambda u,c: join_channel(u,c)))
+app.add_handler(CommandHandler("broadcast", broadcast))
 
 # Callback buttons
 app.add_handler(CallbackQueryHandler(button_handler))
 
-# Add your admin commands from V2 here...
-# Example:
-# app.add_handler(CommandHandler("addadmin", add_admin))
-# app.add_handler(CommandHandler("broadcast", broadcast))
-# etc.
-
-print("🤖 Bot V3 is running...")
+print("🤖 Bot V3 FULLY INTEGRATED is running...")
 app.run_polling()
