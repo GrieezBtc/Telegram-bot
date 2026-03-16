@@ -179,7 +179,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     joined = await check_force_join(update.effective_user.id, context)
     if not joined:
         await update.message.reply_text(
-            "👋 Welcome! You must join our channel and group first.\nTap buttons below and then click 'I Have Joined'.",
+            "👋Hello Welcome! Kindly join our channel and group below to have access to the bot.\nTap the buttons below join the channel and group then click 'I Have Joined after you have successfully join our community'.",
             reply_markup=join_buttons()
         )
         return
