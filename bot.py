@@ -13,14 +13,18 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-TOKEN = "8667912944:AAFXH8oTNQ6w-CKTkfxkyFgyiSEvLMHEOPE"
+import os
+TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = -1003742411752
 CHANNEL_LINK = "https://t.me/+oSyheKUVST9mM2I0"
 REQUIRED_REFERRALS = 2
 COOLDOWN_SECONDS = 10
 # ==========================================
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
 # ================= DATABASE =================
 conn = sqlite3.connect("bot.db", check_same_thread=False)
