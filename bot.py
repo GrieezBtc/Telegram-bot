@@ -1,6 +1,7 @@
 import logging
 import time
 import sqlite3
+import os
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -13,8 +14,10 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-import os
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN is not set!")
+
 CHANNEL_ID = -1003742411752
 CHANNEL_LINK = "https://t.me/+oSyheKUVST9mM2I0"
 REQUIRED_REFERRALS = 2
@@ -68,7 +71,7 @@ def get_all_admins():
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("START COMMAND TRIGGERED")
+    logging.info("START command triggered")
 
     user_id = update.effective_user.id
     args = context.args
@@ -78,9 +81,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not user:
         referred_by = None
+
         if args:
             try:
-                referred_by = int(args[0])
+                potential_ref = int(args[0])
+
+                # prevent self-referral & ensure referrer exists
+                cursor.execute("SELECT 1 FROM users WHERE user_id=?", (potential_ref,))
+                if potential_ref != user_id and cursor.fetchone():
+                    referred_by = potential_ref
+
             except:
                 pass
 
@@ -89,7 +99,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (user_id, referred_by)
         )
 
-        if referred_by and referred_by != user_id:
+        # increment referral safely
+        if referred_by:
             cursor.execute(
                 "UPDATE users SET referrals = referrals + 1 WHERE user_id=?",
                 (referred_by,)
@@ -154,8 +165,7 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref_link = f"https://t.me/{context.bot.username}?start={user_id}"
         await query.message.reply_text(
             f"🚫 Need {REQUIRED_REFERRALS} referrals\n"
-            f"👥 Yours: {referrals}\n\n"
-            f"{ref_link}"
+            f"👥 Yours: {referrals}\n\n{ref_link}"
         )
         return
 
@@ -185,16 +195,31 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if member.status not in ["member", "administrator", "creator"] or referrals < REQUIRED_REFERRALS:
         return
 
-    admin_id = get_all_admins()[0]
+    admins = get_all_admins()
+    if not admins:
+        await update.message.reply_text("No admin available.")
+        return
 
-    sent = await context.bot.forward_message(
-        chat_id=admin_id,
-        from_chat_id=update.message.chat_id,
-        message_id=update.message.message_id
+    for admin_id in admins:
+        try:
+            sent = await context.bot.forward_message(
+                chat_id=admin_id,
+                from_chat_id=update.message.chat_id,
+                message_id=update.message.message_id
+            )
+
+            cursor.execute(
+                "INSERT INTO messages (msg_id, user_id) VALUES (?, ?)",
+                (sent.message_id, user_id)
+            )
+
+        except:
+            pass
+
+    cursor.execute(
+        "UPDATE users SET last_message_time=? WHERE user_id=?",
+        (now, user_id)
     )
-
-    cursor.execute("INSERT INTO messages (msg_id, user_id) VALUES (?, ?)", (sent.message_id, user_id))
-    cursor.execute("UPDATE users SET last_message_time=? WHERE user_id=?", (now, user_id))
     conn.commit()
 
     await update.message.reply_text("📩 Sent to admin.")
@@ -272,18 +297,31 @@ async def admin_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not is_admin(user_id):
         return
 
+    # ADD ADMIN
     if context.user_data.get("add_admin"):
-        cursor.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (int(text),))
-        conn.commit()
-        await update.message.reply_text("Admin added")
+        try:
+            target_id = int(text)
+            cursor.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (target_id,))
+            conn.commit()
+            await update.message.reply_text("✅ Admin added")
+        except:
+            await update.message.reply_text("❌ Invalid user ID")
+
         context.user_data["add_admin"] = False
 
+    # REMOVE ADMIN
     elif context.user_data.get("remove_admin"):
-        cursor.execute("DELETE FROM admins WHERE user_id=?", (int(text),))
-        conn.commit()
-        await update.message.reply_text("Admin removed")
+        try:
+            target_id = int(text)
+            cursor.execute("DELETE FROM admins WHERE user_id=?", (target_id,))
+            conn.commit()
+            await update.message.reply_text("✅ Admin removed")
+        except:
+            await update.message.reply_text("❌ Invalid user ID")
+
         context.user_data["remove_admin"] = False
 
+    # BROADCAST
     elif context.user_data.get("broadcast"):
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
@@ -296,8 +334,12 @@ async def admin_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             except:
                 pass
 
-        await update.message.reply_text(f"Sent to {count} users")
+        await update.message.reply_text(f"📢 Sent to {count} users")
         context.user_data["broadcast"] = False
+
+# ================= ERROR HANDLER =================
+async def error_handler(update, context):
+    logging.error(f"Update {update} caused error {context.error}")
 
 # ================= MAIN =================
 def main():
@@ -310,17 +352,20 @@ def main():
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
     app.add_handler(CallbackQueryHandler(dashboard_callback))
 
-    # ADMIN REPLY (reply to forwarded messages)
+    # ADMIN REPLY
     app.add_handler(MessageHandler(filters.REPLY & filters.TEXT, handle_admin_reply))
 
-    # ADMIN ACTION HANDLER (group 0 – runs first)
+    # ADMIN ACTION
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_message_handler), group=0)
 
-    # USER MESSAGE HANDLER (group 1 – runs after admin handler)
+    # USER MESSAGE
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message), group=1)
 
+    # ERROR HANDLER
+    app.add_error_handler(error_handler)
+
     print("🤖 Bot Running...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
